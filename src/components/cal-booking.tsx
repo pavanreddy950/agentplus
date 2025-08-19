@@ -9,6 +9,34 @@ interface CalBookingProps {
   embedType?: "inline" | "modal" | "link";
 }
 
+interface CalConfig {
+  theme: string;
+  layout: string;
+}
+
+interface CalInlineConfig {
+  elementOrSelector: HTMLElement | string;
+  calLink: string;
+  config?: CalConfig;
+}
+
+interface CalInitConfig {
+  origin: string;
+}
+
+interface CalEmbedFunction {
+  (action: "init", config?: CalInitConfig): void;
+  (action: "inline", config: CalInlineConfig): void;
+  (action: "modal", config: { calLink: string; config?: CalConfig }): void;
+  loaded?: boolean;
+  ns?: Record<string, unknown>;
+  q?: unknown[];
+}
+
+interface WindowWithCal extends Window {
+  Cal?: CalEmbedFunction;
+}
+
 const CalBooking = ({ 
   calLink = undefined,
   height = "500px",
@@ -18,7 +46,7 @@ const CalBooking = ({
   embedType = "inline"
 }: CalBookingProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const envCalLink = (import.meta as any).env?.VITE_CAL_LINK as string | undefined;
+  const envCalLink = (import.meta as { env?: { VITE_CAL_LINK?: string } }).env?.VITE_CAL_LINK;
   const resolvedCalLink = calLink || envCalLink || "router?form=2935075";
 
   useEffect(() => {
@@ -27,12 +55,12 @@ const CalBooking = ({
 
     // Official Cal.com embed snippet
     const initCalEmbed = () => {
-      (function (C: any, A: string, L: string) {
-        let p = function (a: any, ar: any) { a.q.push(ar); };
-        let d = C.document;
-        C.Cal = C.Cal || function () {
-          let cal = C.Cal;
-          let ar = arguments;
+      (function (C: Window, A: string, L: string) {
+        const p = function (a: { q: unknown[] }, ar: unknown) { a.q.push(ar); };
+        const d = C.document;
+        C.Cal = C.Cal || function (...args: unknown[]) {
+          const cal = C.Cal as CalEmbedFunction;
+          const ar = args;
           if (!cal.loaded) {
             cal.ns = {};
             cal.q = cal.q || [];
@@ -40,12 +68,12 @@ const CalBooking = ({
             cal.loaded = true;
           }
           if (ar[0] === L) {
-            const api = function () { p(api, arguments); };
+            const api = function (...apiArgs: unknown[]) { p(api, apiArgs); };
             const namespace = ar[1];
             api.q = api.q || [];
             if (typeof namespace === "string") {
               cal.ns[namespace] = cal.ns[namespace] || api;
-              p(cal.ns[namespace], ar);
+              p(cal.ns[namespace] as { q: unknown[] }, ar);
               p(cal, ['initNamespace', namespace]);
             } else p(cal, ar);
             return;
@@ -56,9 +84,10 @@ const CalBooking = ({
 
       // Wait for Cal to be available
       const waitForCal = () => {
-        if ((window as any).Cal && containerRef.current) {
+        const windowWithCal = window as WindowWithCal;
+        if (windowWithCal.Cal && containerRef.current) {
           // Initialize Cal
-          (window as any).Cal("init", {
+          windowWithCal.Cal("init", {
             origin: "https://app.cal.com"
           });
 
@@ -67,7 +96,7 @@ const CalBooking = ({
             if (containerRef.current) {
               containerRef.current.innerHTML = "";
             }
-            (window as any).Cal("inline", {
+            windowWithCal.Cal("inline", {
               elementOrSelector: containerRef.current,
               calLink: resolvedCalLink,
               config: {
@@ -90,126 +119,47 @@ const CalBooking = ({
 
     return () => {
       // Cleanup
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      const currentContainer = containerRef.current;
+      if (currentContainer) {
+        currentContainer.innerHTML = '';
       }
     };
   }, [resolvedCalLink, theme, layout, embedType]);
 
   if (embedType === "modal") {
     // For modal type, return a button that triggers the modal
-    const handleModalClick = () => {
-      // Initialize Cal if not already done
-      if (!(window as any).Cal) {
-        (function (C: any, A: string, L: string) {
-          let p = function (a: any, ar: any) { a.q.push(ar); };
-          let d = C.document;
-          C.Cal = C.Cal || function () {
-            let cal = C.Cal;
-            let ar = arguments;
-            if (!cal.loaded) {
-              cal.ns = {};
-              cal.q = cal.q || [];
-              d.head.appendChild(d.createElement("script")).src = A;
-              cal.loaded = true;
-            }
-            if (ar[0] === L) {
-              const api = function () { p(api, arguments); };
-              const namespace = ar[1];
-              api.q = api.q || [];
-              if (typeof namespace === "string") {
-                cal.ns[namespace] = cal.ns[namespace] || api;
-                p(cal.ns[namespace], ar);
-                p(cal, ['initNamespace', namespace]);
-              } else p(cal, ar);
-              return;
-            }
-            p(cal, ar);
-          };
-        })(window, "https://app.cal.com/embed/embed.js", "init");
-      }
-
-      // Wait and trigger modal
-      const waitAndTrigger = () => {
-        if ((window as any).Cal) {
-          (window as any).Cal("init", {
-            origin: "https://app.cal.com"
-          });
-          
-          (window as any).Cal("modal", {
-            calLink: resolvedCalLink,
-            config: {
-              theme: theme,
-              layout: layout
-            }
-          });
-        } else {
-          setTimeout(waitAndTrigger, 100);
-        }
-      };
-
-      waitAndTrigger();
-    };
-
     return (
-      <button 
-        onClick={handleModalClick}
-        className={`cal-booking-button bg-brand-orange hover:bg-brand-orange/90 text-white px-4 py-2 rounded-lg ${className}`}
+      <button
+        className={`cal-link ${className}`}
+        data-cal-link={resolvedCalLink}
+        data-cal-config={`{"theme":"${theme}","layout":"${layout}"}`}
       >
-        Book Free Discovery Call
+        Book a meeting
       </button>
     );
   }
 
   if (embedType === "link") {
-    const href = `https://cal.com/${resolvedCalLink}`;
+    // For link type, return a simple link
     return (
       <a
-        href={href}
+        href={`https://app.cal.com/${resolvedCalLink}`}
+        className={`cal-link ${className}`}
         target="_blank"
-        rel="noreferrer"
-        className={`inline-flex items-center justify-center bg-brand-orange hover:bg-brand-orange/90 text-white px-5 py-3 rounded-lg ${className}`}
+        rel="noopener noreferrer"
       >
-        Book Now
+        Book a meeting
       </a>
     );
   }
 
+  // For inline type, return the container
   return (
-    <div className={`cal-booking-widget ${className}`}>
-      <div 
-        ref={containerRef}
-        style={{ 
-          width: '100%', 
-          height: height, 
-          minHeight: height,
-          borderRadius: '12px',
-          overflow: 'hidden'
-        }}
-        className="relative"
-      >
-        {/* Visual fallback while embed script loads */}
-        <div 
-          className="absolute inset-0"
-          style={{
-            backgroundImage: "url('/calendarimage.png')",
-            backgroundSize: 'cover',
-            backgroundPosition: 'center'
-          }}
-        />
-        <div className="absolute inset-0 bg-brand-dark/70" />
-        <div className="absolute bottom-4 right-4">
-          <a
-            href={`https://cal.com/${resolvedCalLink}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center justify-center bg-brand-orange hover:bg-brand-orange/90 text-white px-4 py-2 rounded-lg shadow-soft"
-          >
-            Open Scheduler
-          </a>
-        </div>
-      </div>
-    </div>
+    <div
+      ref={containerRef}
+      className={`cal-inline ${className}`}
+      style={{ height }}
+    />
   );
 };
 
